@@ -1,0 +1,82 @@
+name: Deploy to Alibaba Cloud ECS
+
+on:
+  push:
+    branches: [main]  # trigger on push to main branch only
+  pull_request:
+    branches: [main]  # trigger on PR to main only
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+      - name: Build and push Docker image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t aphommasone/switch-ev:latest \
+            --build-arg NEXT_PUBLIC_BACKEND_URL="${{ secrets.NEXT_PUBLIC_BACKEND_URL }}" \
+            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}" \
+            --push .
+
+      - name: Deploy to Alibaba Cloud ECS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.ALIBABA_HOST }}
+          username: ${{ secrets.ALIBABA_USERNAME }}
+          key: ${{ secrets.ALIBABA_SSH_KEY }}
+          passphrase: ${{ secrets.ALIBABA_SSH_PASSPHRASE }}
+          script: |
+            echo "🚀 Starting deployment..."
+            
+            # Pull latest image from DockerHub
+            sudo docker pull aphommasone/switch-ev:latest
+            
+            # Restart the service (this will use the new image)
+            sudo systemctl restart switch-ev
+            
+            # Clean up unused Docker resources
+            sudo docker system prune -f
+            
+            echo "✅ Deployment completed successfully!"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.ALIBABA_HOST }}
+          username: ${{ secrets.ALIBABA_USERNAME }}
+          key: ${{ secrets.ALIBABA_SSH_KEY }}
+          passphrase: ${{ secrets.ALIBABA_SSH_PASSPHRASE }}
+          script: |
+            # Check if service is running
+            sudo systemctl status switch-ev
+            
+            # Check if Docker container is running
+            sudo docker ps | grep switch-ev-container || echo "Container not running"
+            
+            # Test application endpoint
+            sleep 10
+            curl -f http://localhost:3000 || echo "Application health check failed"

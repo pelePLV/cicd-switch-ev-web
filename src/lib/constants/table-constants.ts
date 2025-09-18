@@ -1,0 +1,20 @@
+export const TABLE_CONSTANTS = {
+  PAGINATION: {
+    ITEMS_PER_PAGE: 50,
+    DEFAULT_PAGE: 1,
+  },
+  VEHICLE_TABLE: {
+    ITEMS_PER_PAGE: 50,
+  },
+  SWITCH_STATION_TABLE: {
+    ITEMS_PER_PAGE: 50,
+  },
+  BATTERY_TRANSACTION_TABLE: {
+    ITEMS_PER_PAGE: 50,
+  },
+  CUSTOMER_INFORMATION_TABLE: {
+    ITEMS_PER_PAGE: 50,
+  },
+} as const
+
+export default TABLE_CONSTANTS 

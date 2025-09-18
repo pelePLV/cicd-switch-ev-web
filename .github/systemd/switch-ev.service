@@ -1,0 +1,18 @@
+[Unit]
+Description=Switch EV Next.js Application
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStartPre=-/usr/bin/docker stop switch-ev-container
+ExecStartPre=-/usr/bin/docker rm switch-ev-container
+ExecStart=/usr/bin/docker run -d --name switch-ev-container -p 4000:3000 --env-file /etc/switch-ev.env --restart unless-stopped switch-ev:latest
+ExecStop=/usr/bin/docker stop switch-ev-container
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target

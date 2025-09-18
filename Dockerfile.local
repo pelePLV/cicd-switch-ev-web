@@ -1,0 +1,42 @@
+# Base with Alpine; add libc6-compat for sharp/openssl compat
+FROM public.ecr.aws/docker/library/node:18-alpine AS base
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# --- Install deps for building (uses lockfile) ---
+FROM base AS deps
+COPY package*.json ./
+# Full deps for build (dev + prod)
+RUN npm ci
+
+# --- Build stage ---
+FROM base AS builder
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+WORKDIR /app
+
+# Bring in node_modules and source; build standalone
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+# ensure next.config.js has: module.exports = { output: 'standalone' }
+RUN npm run build
+
+# --- Runtime (smallest) ---
+FROM base AS runner
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+WORKDIR /app
+
+# Run as non-root
+RUN addgroup -S nextjs -g 1001 && adduser -S nextjs -u 1001 -G nextjs
+
+# Copy only what we need to run
+# .next/standalone already contains server.js and required node_modules
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/.next/standalone ./
+
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]
