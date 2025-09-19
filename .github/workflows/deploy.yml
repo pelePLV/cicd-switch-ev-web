@@ -39,11 +39,6 @@ jobs:
               git reset --hard origin/main
             fi
             
-            # Stop existing container if running
-            echo "⏹️ Stopping existing container..."
-            sudo docker stop switch-ev || true
-            sudo docker rm switch-ev || true
-            
             # Build new Docker image locally on server
             echo "🔨 Building Docker image on server..."
             sudo docker build -t switch-ev:latest \
@@ -51,21 +46,23 @@ jobs:
               --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}" \
               .
             
-            # Start new container
-            echo "▶️ Starting new container..."
-            sudo docker run -d \
-              --name switch-ev \
-              -p 4000:3000 \
-              --env-file /etc/switch-ev.env \
-              --restart unless-stopped \
-              switch-ev:latest
+            # Update systemd service to use local image
+            echo "⚙️ Updating systemd service..."
+            sudo sed -i 's|aphommasone/switch-ev:latest|switch-ev:latest|g' /etc/systemd/system/switch-ev.service
+            sudo sed -i 's|ExecStartPre=/usr/bin/docker pull.*|# Image built locally, no pull needed|g' /etc/systemd/system/switch-ev.service
             
-            # Wait a moment for container to start
-            sleep 5
+            # Reload systemd and restart service
+            echo "🔄 Restarting service via systemd..."
+            sudo systemctl daemon-reload
+            sudo systemctl enable switch-ev
+            sudo systemctl restart switch-ev
             
-            # Check container status
-            echo "📊 Container status:"
-            sudo docker ps -f name=switch-ev
+            # Wait for service to start
+            sleep 10
+            
+            # Check service status
+            echo "📊 Service status:"
+            sudo systemctl status switch-ev --no-pager -l
             
             # Check if application is responding
             echo "🔍 Health check:"
