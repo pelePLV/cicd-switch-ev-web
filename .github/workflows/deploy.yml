@@ -1,0 +1,79 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_BACKEND_URL=${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ALIBABA_HOST }}
+          username: ${{ secrets.ALIBABA_USERNAME }}
+          key: ${{ secrets.ALIBABA_SSH_KEY }}
+          passphrase: ${{ secrets.ALIBABA_SSH_PASSPHRASE }}
+          script: |
+            # Login to GitHub Container Registry on server
+            echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Update systemd service to use new image path
+            sudo sed -i 's|aphommasone/switch-ev:latest|ghcr.io/${{ github.repository_owner }}/switch-ev-test:latest|g' /etc/systemd/system/switch-ev.service
+            
+            # Reload systemd and restart service
+            sudo systemctl daemon-reload
+            sudo systemctl restart switch-ev
+            
+            # Check service status
+            sudo systemctl status switch-ev --no-pager
+            
+            # Clean up old images (optional)
+            docker image prune -f
