@@ -45,7 +45,6 @@ const Login = () => {
 
   return (
     <div className="font-montserrat min-h-screen bg-gray-50 p-4 pb-10">
-      <div className="text-2xl font-bold">test ci/cd deploy</div>
       <div className="relative flex min-h-[calc(100vh-2rem)] w-full items-center justify-center overflow-hidden rounded-xl bg-white p-6 shadow-sm md:p-10">
         {/* Floating Logo 1 - Top Right */}
         <FloatingLogoBackground
@@ -79,7 +78,7 @@ const Login = () => {
               SWITCH
             </h1>
             <p className="text-center text-base font-normal text-green-600">
-              Swap batteries and keep moving forward
+              Swap batteries and keep moving forward.
             </p>
           </div>
 

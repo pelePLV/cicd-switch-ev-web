@@ -9,7 +9,6 @@ const Overview = () => {
     <div className="min-h-screen bg-white p-5">
       {/* Overview Header */}
       <OverviewHeader />
-      <div className="text-2xl font-bold">test ci/cd deploy</div>
 
       {/* Overview Statistics */}
       <OverviewStatistics />
