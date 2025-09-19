@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -32,11 +31,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT }}
 
+      - name: Create lowercase image name
+        id: image-name
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image-name=${{ env.REGISTRY }}/${REPO_LOWER}" >> $GITHUB_OUTPUT
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image-name.outputs.image-name }}
           tags: |
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
@@ -74,8 +79,10 @@ jobs:
           script: |
             echo "🚀 Starting deployment process..."
             
-            # Define variables
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest"
+            # Define variables with lowercase conversion
+            REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_NAME="ghcr.io/${REPO_OWNER}/${REPO_NAME}:latest"
             echo "📦 Target image: $IMAGE_NAME"
             
             # Login to GitHub Container Registry on server
@@ -116,6 +123,7 @@ jobs:
             echo "⚙️ Updating systemd service configuration..."
             sudo sed -i "s|aphommasone/switch-ev:latest|$IMAGE_NAME|g" /etc/systemd/system/switch-ev.service
             sudo sed -i "s|switch-ev:latest|$IMAGE_NAME|g" /etc/systemd/system/switch-ev.service
+            sudo sed -i "s|ghcr.io/.*/.*:latest|$IMAGE_NAME|g" /etc/systemd/system/switch-ev.service
             sudo sed -i "s|ExecStartPre=/usr/bin/docker pull.*|# Image pulled from registry|g" /etc/systemd/system/switch-ev.service
             
             # Show updated service configuration
@@ -191,7 +199,7 @@ jobs:
             
             # Clean up old images (keep last 2 versions)
             echo "🧹 Cleaning up old Docker images..."
-            sudo docker images | grep -E "(ghcr.io.*switch|aphommasone/switch)" | tail -n +3 | awk '{print $3}' | xargs -r sudo docker rmi 2>/dev/null || true
+            sudo docker images | grep -E "(ghcr.io.*${REPO_NAME}|aphommasone/switch)" | tail -n +3 | awk '{print $3}' | xargs -r sudo docker rmi 2>/dev/null || true
             sudo docker image prune -f
             
             echo "🎉 Deployment completed successfully!"
