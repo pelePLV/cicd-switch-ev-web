@@ -23,28 +23,57 @@ jobs:
             
             # Navigate to app directory or create it
             APP_DIR="/opt/switch-ev"
-            if [ ! -d "$APP_DIR" ]; then
-              sudo mkdir -p $APP_DIR
-              sudo chown $USER:$USER $APP_DIR
-            fi
+            echo "📁 Setting up directory: $APP_DIR"
+            sudo mkdir -p $APP_DIR
+            sudo chown -R $USER:$USER $APP_DIR
             cd $APP_DIR
             
-            # Clone or update source code
+            # Clone or update source code with better error handling
             if [ ! -d ".git" ]; then
               echo "📦 Cloning repository..."
-              git clone https://github.com/pelePLV/cicd-switch-ev-web.git .
+              if ! git clone https://github.com/pelePLV/cicd-switch-ev-web.git .; then
+                echo "❌ Git clone failed! Trying with different method..."
+                rm -rf * .git 2>/dev/null || true
+                if ! git clone --depth 1 https://github.com/pelePLV/cicd-switch-ev-web.git temp; then
+                  echo "❌ All git clone methods failed! Exiting..."
+                  exit 1
+                fi
+                mv temp/* . 2>/dev/null || true
+                mv temp/.* . 2>/dev/null || true
+                rm -rf temp
+              fi
             else
               echo "🔄 Updating repository..."
-              git fetch origin
-              git reset --hard origin/main
+              git fetch origin || echo "⚠️ Git fetch failed, continuing..."
+              git reset --hard origin/main || git reset --hard HEAD
             fi
+            
+            # Verify source code exists
+            if [ ! -f "package.json" ]; then
+              echo "❌ Source code not found! Deployment failed."
+              exit 1
+            fi
+            echo "✅ Source code ready"
             
             # Build new Docker image locally on server
             echo "🔨 Building Docker image on server..."
-            sudo docker build -t switch-ev:latest \
+            if ! sudo docker build -t switch-ev:latest \
               --build-arg NEXT_PUBLIC_BACKEND_URL="${{ secrets.NEXT_PUBLIC_BACKEND_URL }}" \
               --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}" \
-              .
+              .; then
+              echo "❌ Docker build failed! Rolling back to stable image..."
+              # Ensure service uses working Docker Hub image
+              sudo sed -i 's|switch-ev:latest|aphommasone/switch-ev:latest|g' /etc/systemd/system/switch-ev.service
+              sudo sed -i 's|# Image built locally, no pull needed|ExecStartPre=/usr/bin/docker pull aphommasone/switch-ev:latest|g' /etc/systemd/system/switch-ev.service
+              sudo systemctl daemon-reload
+              sudo systemctl restart switch-ev
+              echo "✅ Rolled back to stable version"
+              exit 1
+            fi
+            echo "✅ Docker image built successfully"
+            
+            # Backup current service config (in case rollback needed)
+            sudo cp /etc/systemd/system/switch-ev.service /etc/systemd/system/switch-ev.service.backup
             
             # Update systemd service to use local image
             echo "⚙️ Updating systemd service..."
@@ -55,7 +84,20 @@ jobs:
             echo "🔄 Restarting service via systemd..."
             sudo systemctl daemon-reload
             sudo systemctl enable switch-ev
-            sudo systemctl restart switch-ev
+            
+            # Stop old container gracefully
+            sudo docker stop switch-ev 2>/dev/null || true
+            sudo docker rm switch-ev 2>/dev/null || true
+            
+            # Start service
+            if ! sudo systemctl restart switch-ev; then
+              echo "❌ Service restart failed! Rolling back..."
+              sudo cp /etc/systemd/system/switch-ev.service.backup /etc/systemd/system/switch-ev.service
+              sudo systemctl daemon-reload
+              sudo systemctl restart switch-ev
+              echo "✅ Rolled back to stable version"
+              exit 1
+            fi
             
             # Wait for service to start
             sleep 10
@@ -64,9 +106,27 @@ jobs:
             echo "📊 Service status:"
             sudo systemctl status switch-ev --no-pager -l
             
-            # Check if application is responding
+            # Check if application is responding (with retry)
             echo "🔍 Health check:"
-            curl -f http://localhost:4000 > /dev/null 2>&1 && echo "✅ Application is running!" || echo "❌ Application not responding"
+            for i in {1..5}; do
+              if curl -f http://localhost:4000 > /dev/null 2>&1; then
+                echo "✅ Application is running!"
+                break
+              else
+                echo "⏳ Attempt $i/5 - Waiting for application..."
+                sleep 5
+              fi
+              
+              if [ $i -eq 5 ]; then
+                echo "❌ Application not responding after 5 attempts"
+                echo "🔄 Rolling back..."
+                sudo cp /etc/systemd/system/switch-ev.service.backup /etc/systemd/system/switch-ev.service
+                sudo systemctl daemon-reload
+                sudo systemctl restart switch-ev
+                echo "✅ Rolled back to stable version"
+                exit 1
+              fi
+            done
             
             # Clean up old unused images
             echo "🧹 Cleaning up old images..."
