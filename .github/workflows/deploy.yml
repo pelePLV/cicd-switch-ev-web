@@ -21,6 +21,15 @@ jobs:
           script: |
             echo "🚀 Starting deployment process..."
             
+            # Install git if not present
+            echo "🔧 Checking and installing git..."
+            if ! command -v git &> /dev/null; then
+              echo "📦 Installing git..."
+              sudo yum update -y
+              sudo yum install -y git
+            fi
+            echo "✅ Git is available"
+            
             # Navigate to app directory or create it
             APP_DIR="/opt/switch-ev"
             echo "📁 Setting up directory: $APP_DIR"
@@ -28,24 +37,51 @@ jobs:
             sudo chown -R $USER:$USER $APP_DIR
             cd $APP_DIR
             
+            # Alternative: Download source as zip if git still fails
+            download_source_as_zip() {
+              echo "📥 Downloading source as ZIP archive..."
+              if ! curl -L -o source.zip https://github.com/pelePLV/cicd-switch-ev-web/archive/refs/heads/main.zip; then
+                echo "❌ Failed to download source code"
+                return 1
+              fi
+              
+              if ! command -v unzip &> /dev/null; then
+                sudo yum install -y unzip
+              fi
+              
+              unzip -q source.zip
+              mv cicd-switch-ev-web-main/* . 2>/dev/null || true
+              mv cicd-switch-ev-web-main/.* . 2>/dev/null || true
+              rm -rf cicd-switch-ev-web-main source.zip
+              return 0
+            }
+            
             # Clone or update source code with better error handling
             if [ ! -d ".git" ]; then
               echo "📦 Cloning repository..."
               if ! git clone https://github.com/pelePLV/cicd-switch-ev-web.git .; then
-                echo "❌ Git clone failed! Trying with different method..."
+                echo "❌ Git clone failed! Trying ZIP download method..."
                 rm -rf * .git 2>/dev/null || true
-                if ! git clone --depth 1 https://github.com/pelePLV/cicd-switch-ev-web.git temp; then
-                  echo "❌ All git clone methods failed! Exiting..."
+                if ! download_source_as_zip; then
+                  echo "❌ All download methods failed! Exiting..."
                   exit 1
                 fi
-                mv temp/* . 2>/dev/null || true
-                mv temp/.* . 2>/dev/null || true
-                rm -rf temp
               fi
             else
               echo "🔄 Updating repository..."
-              git fetch origin || echo "⚠️ Git fetch failed, continuing..."
-              git reset --hard origin/main || git reset --hard HEAD
+              if ! git fetch origin; then
+                echo "⚠️ Git fetch failed, trying ZIP download..."
+                cd ..
+                rm -rf $APP_DIR
+                mkdir -p $APP_DIR
+                cd $APP_DIR
+                if ! download_source_as_zip; then
+                  echo "❌ Failed to update source code"
+                  exit 1
+                fi
+              else
+                git reset --hard origin/main
+              fi
             fi
             
             # Verify source code exists
